@@ -1,0 +1,286 @@
+// ==UserScript==
+// @name         Automatický sběr bez PB (pouze kopí)
+// @version      1.1
+// @description  Automaticky posílá sběr + odemyká sběry, přeskočí sběr pokud méně než 10 jednotek
+// @author       Wwwww
+// @match        https://*.divokekmeny.cz/game.php?*screen=place&*mode=scavenge*
+// @icon         https://www.google.com/s2/favicons?sz=64&domain=divokekmeny.cz
+// ==/UserScript==
+
+(function() {
+    'use strict';
+
+    const STORAGE_KEY = 'spearAllocEnabled';
+
+    const container = document.createElement('div');
+    container.style.position = 'fixed';
+    container.style.left = '10px';
+    container.style.top = '50%';
+    container.style.transform = 'translateY(-50%)';
+    container.style.zIndex = '9999';
+    container.style.backgroundColor = '#222';
+    container.style.color = '#eee';
+    container.style.padding = '12px 18px';
+    container.style.borderRadius = '8px';
+    container.style.fontFamily = '"Segoe UI", Tahoma, Geneva, Verdana, sans-serif';
+    container.style.fontSize = '16px';
+    container.style.fontWeight = '600';
+    container.style.cursor = 'pointer';
+    container.style.userSelect = 'none';
+    container.style.boxShadow = '0 4px 12px rgba(0,0,0,0.6)';
+    container.style.transition = 'background-color 0.3s ease, color 0.3s ease';
+
+    const statusText = document.createElement('div');
+    statusText.style.fontWeight = '400';
+    statusText.style.fontSize = '12px';
+    statusText.style.marginTop = '6px';
+    statusText.style.color = '#ddd';
+
+    let enabled = false;
+    let reloadTimeoutId = null;
+    let countdownIntervalId = null;
+    let reloadTimestamp = null;
+
+    const reloadDelayRunning = 300000; // 5 minut čekání na běžící sběr nebo po odemknutí (5 * 60 * 1000)
+    const reloadDelayAfterSend = 120000; // 2 minuty čekání po odeslání sběrů (2 * 60 * 1000)
+
+    function updateText(enabled, extraMsg = '') {
+        container.textContent = enabled ? 'sběr - ON' : 'sběr - OFF';
+        container.style.backgroundColor = enabled ? '#2ecc71' : '#e74c3c';
+        container.style.color = '#fff';
+
+        container.appendChild(statusText);
+        statusText.textContent = extraMsg;
+    }
+
+    container.addEventListener('mouseenter', () => {
+        container.style.filter = 'brightness(1.1)';
+    });
+    container.addEventListener('mouseleave', () => {
+        container.style.filter = 'none';
+    });
+
+    container.addEventListener('click', () => {
+        enabled = !enabled;
+        localStorage.setItem(STORAGE_KEY, enabled ? 'true' : 'false');
+        updateText(enabled);
+        if (enabled) {
+            runScript();
+        } else {
+            clearAllTimers();
+        }
+    });
+
+    document.body.appendChild(container);
+
+    const savedState = localStorage.getItem(STORAGE_KEY);
+    enabled = savedState === 'true';
+    updateText(enabled);
+
+    let intervalId = null;
+
+    function clearAllTimers() {
+        if (intervalId) {
+            clearInterval(intervalId);
+            intervalId = null;
+        }
+        if (reloadTimeoutId) {
+            clearTimeout(reloadTimeoutId);
+            reloadTimeoutId = null;
+        }
+        if (countdownIntervalId) {
+            clearInterval(countdownIntervalId);
+            countdownIntervalId = null;
+        }
+        reloadTimestamp = null;
+        updateText(false, '');
+    }
+
+    function startReloadCountdown(delay) {
+        if (reloadTimeoutId) clearTimeout(reloadTimeoutId);
+        if (countdownIntervalId) clearInterval(countdownIntervalId);
+
+        reloadTimestamp = Date.now() + delay;
+
+        countdownIntervalId = setInterval(() => {
+            const remainingMs = reloadTimestamp - Date.now();
+            if (remainingMs <= 0) {
+                updateText(true, 'Reload...');
+                clearInterval(countdownIntervalId);
+                return;
+            }
+            const secondsLeft = Math.ceil(remainingMs / 1000);
+            updateText(true, `Reload za ${secondsLeft}s`);
+        }, 500);
+
+        reloadTimeoutId = setTimeout(() => {
+            location.reload();
+        }, delay);
+    }
+
+    function runScript() {
+        const checkInterval = 500;
+        const maxWaitTime = 10000;
+        let waited = 0;
+
+        const allocationDelay = 1500;
+
+        if (intervalId) clearInterval(intervalId);
+
+        intervalId = setInterval(() => {
+            const spearElement = document.querySelector('a.units-entry-all.squad-village-required[data-unit="spear"]');
+            if (spearElement) {
+                const spearText = spearElement.textContent;
+                const spearMatch = spearText.match(/\((\d+)\)/);
+                let spearCount = 0;
+                if (spearMatch) {
+                    spearCount = parseInt(spearMatch[1], 10);
+                    if (spearCount > 1000) {
+                        spearCount = 1000;
+                    }
+                } else {
+                    clearInterval(intervalId);
+                    return;
+                }
+
+                const scavengeOptions = Array.from(document.querySelectorAll('div.scavenge-option'));
+                if (scavengeOptions.length === 0) {
+                    clearInterval(intervalId);
+                    return;
+                }
+
+                let anyRunning = false;
+                const availableForSend = [];
+                const lockedScavenges = [];
+
+                scavengeOptions.forEach((opt) => {
+                    const startBtn = opt.querySelector('a.btn.btn-default.free_send_button');
+                    const unlockBtn = opt.querySelector('a.btn.btn-default.unlock-button');
+                    const returnCountdown = opt.querySelector('span.return-countdown');
+
+                    if (startBtn) {
+                        availableForSend.push(opt);
+                    } else if (unlockBtn) {
+                        lockedScavenges.push(opt);
+                    } else if (returnCountdown && returnCountdown.textContent.trim() !== '') {
+                        anyRunning = true;
+                    }
+                });
+
+                if (!anyRunning && availableForSend.length > 0) {
+                    const count = availableForSend.length;
+                    const allocationPercentages = {
+                        4: [57.63, 23.03, 11.51, 7.64],
+                        3: [62.48, 24.99, 12.49],
+                        2: [71.42, 28.57],
+                        1: [100]
+                    };
+
+                    const percentages = allocationPercentages[count] || [100];
+                    const allocation = percentages.map(pct => Math.floor((pct / 100) * spearCount));
+
+                    clearInterval(intervalId);
+                    intervalId = null;
+
+                    function sendScavenges(index = 0) {
+                        if (!enabled) {
+                            return;
+                        }
+                        if (index >= availableForSend.length) {
+                            startReloadCountdown(reloadDelayAfterSend);
+                            return;
+                        }
+
+                        const opt = availableForSend[index];
+                        const unitsInput = document.querySelector('input[name="spear"]');
+                        if (!unitsInput) {
+                            return;
+                        }
+
+                        const unitsToSend = allocation[index];
+
+                        // Přeskočit pokud je jednotek méně než 10
+                        if (unitsToSend < 10) {
+                            sendScavenges(index + 1);
+                            return;
+                        }
+
+                        unitsInput.value = unitsToSend;
+
+                        ['input', 'change', 'keyup', 'keydown', 'blur'].forEach(eventType => {
+                            unitsInput.dispatchEvent(new Event(eventType, { bubbles: true }));
+                        });
+
+                        const startBtn = opt.querySelector('a.btn.btn-default.free_send_button');
+                        if (!startBtn) {
+                            sendScavenges(index + 1);
+                            return;
+                        }
+
+                        startBtn.click();
+
+                        setTimeout(() => {
+                            sendScavenges(index + 1);
+                        }, allocationDelay);
+                    }
+
+                    sendScavenges();
+
+                    return;
+                }
+
+                if (anyRunning || availableForSend.length === 0) {
+                    if (lockedScavenges.length > 0) {
+                        const unlockContainer = lockedScavenges[0];
+                        const unlockBtn = unlockContainer.querySelector('a.btn.btn-default.unlock-button');
+
+                        if (unlockBtn) {
+                            unlockBtn.click();
+
+                            setTimeout(() => {
+                                const confirmUnlock = document.querySelector('a.btn.btn-default:not(.btn-disabled):not(.unlock-button)');
+                                const disabledUnlock = document.querySelector('a.btn.btn-default.btn-disabled');
+
+                                if (confirmUnlock && confirmUnlock.textContent.includes('Odemknout')) {
+                                    confirmUnlock.click();
+                                    startReloadCountdown(reloadDelayRunning);
+                                } else if (disabledUnlock && disabledUnlock.textContent.includes('Odemknout')) {
+                                    const closeBtn = document.querySelector('a.popup_box_close.tooltip-delayed');
+                                    if (closeBtn) {
+                                        closeBtn.click();
+                                    }
+                                    startReloadCountdown(reloadDelayRunning);
+                                } else {
+                                    startReloadCountdown(reloadDelayRunning);
+                                }
+                            }, 1000);
+                        } else {
+                            startReloadCountdown(reloadDelayRunning);
+                        }
+
+                        clearInterval(intervalId);
+                        return;
+                    } else {
+                        startReloadCountdown(reloadDelayRunning);
+                        clearInterval(intervalId);
+                        return;
+                    }
+                }
+
+                startReloadCountdown(reloadDelayRunning);
+                clearInterval(intervalId);
+
+            } else {
+                waited += checkInterval;
+                if (waited > maxWaitTime) {
+                    clearInterval(intervalId);
+                }
+            }
+        }, checkInterval);
+    }
+
+    if (enabled) {
+        runScript();
+    }
+
+})();
