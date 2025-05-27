@@ -1,0 +1,71 @@
+// ==UserScript==
+// @name         Výběr odměn
+// @namespace    http://tampermonkey.net/
+// @version      1.5
+// @description  Automatizace výběru odměn s opakovaným klikáním na všechny dostupné odměny.
+// @author       Wwww
+// @match        https://*.divokekmeny.cz/game.php?*screen=main*
+// @grant        none
+// ==/UserScript==
+
+(function () {
+    'use strict';
+
+    function sleep(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    async function closePopupAndReload() {
+        const closeButton = document.querySelector('a.popup_box_close');
+        if (closeButton) {
+            closeButton.click();
+        }
+
+        const delay = Math.floor(Math.random() * 5 * 60 * 1000) + 5 * 60 * 1000; // 5–10 minut
+        await sleep(delay);
+        location.reload();
+    }
+
+    async function claimAllRewards() {
+        while (true) {
+            const btn = document.querySelector('a.reward-system-claim-button');
+            if (!btn) break;
+            const waitTime = Math.random() * 1000 + 1000; // 1–2 sekundy
+            await sleep(waitTime);
+            btn.click();
+        }
+    }
+
+    async function clickRewardFlow() {
+        const newQuestButton = document.querySelector('#new_quest');
+        if (newQuestButton) {
+            newQuestButton.click();
+        } else {
+            return;
+        }
+
+        const delay = Math.random() * 2000 + 2000; // 2–4 sekundy
+        await sleep(delay);
+
+        const rewardTab = document.querySelector('a[data-tab="reward-tab"]');
+        if (rewardTab) {
+            rewardTab.click();
+        } else {
+            return;
+        }
+
+        await sleep(1000);
+
+        const firstReward = document.querySelector('a.reward-system-claim-button');
+        if (!firstReward) {
+            await closePopupAndReload();
+            return;
+        }
+
+        await claimAllRewards();
+
+        await closePopupAndReload();
+    }
+
+    setTimeout(clickRewardFlow, 3000);
+})();
