@@ -1,0 +1,86 @@
+// ==UserScript==
+// @name         Rozcestník
+// @namespace    http://tampermonkey.net/
+// @version      1.0
+// @description  Rozcestník pro Divoké kmeny
+// @author       Wwww
+// @match        *://*.divokekmeny.cz/*
+// @grant        none
+// ==/UserScript==
+
+(function() {
+    'use strict';
+
+    function getVillageId() {
+        const match = window.location.href.match(/[?&]village=(\d+)/);
+        return match ? match[1] : null;
+    }
+
+    const villageId = getVillageId();
+    if (!villageId) return;
+
+    const container = document.createElement('div');
+    container.style.position = 'fixed';
+    container.style.top = '10px';       // úplně nahoře
+    container.style.right = '20px';     // lehce odsazeno od pravého okraje
+    container.style.width = '160px';
+    container.style.padding = '10px';
+    container.style.border = '2px solid #4682B4';
+    container.style.borderRadius = '8px';
+    container.style.backgroundColor = '#B0C4DE';
+    container.style.boxShadow = '0 4px 8px rgba(0, 0, 0, 0.2)';
+    container.style.fontFamily = "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif";
+    container.style.color = '#333';
+    container.style.zIndex = '10000';
+    container.style.userSelect = 'none';
+
+    const title = document.createElement('div');
+    title.textContent = '🌿 Rozcestník';
+    title.style.fontWeight = '700';
+    title.style.fontSize = '18px';
+    title.style.marginBottom = '12px';
+    title.style.textAlign = 'center';
+    title.style.color = '#4682B4';
+    container.appendChild(title);
+
+    const links = [
+        { name: 'Hlavní budova', screen: 'main' },
+        { name: 'Sběr', screen: 'place&mode=scavenge' },
+        { name: 'Kasárna', screen: 'barracks' },
+        { name: 'Stáj', screen: 'stable' }
+    ];
+
+    links.forEach(link => {
+        const btn = document.createElement('button');
+        btn.textContent = link.name;
+        btn.style.width = '100%';
+        btn.style.padding = '7px 0';
+        btn.style.margin = '6px 0';
+        btn.style.border = 'none';
+        btn.style.borderRadius = '5px';
+        btn.style.backgroundColor = '#4682B4';
+        btn.style.color = 'white';
+        btn.style.fontSize = '14px';
+        btn.style.fontWeight = '600';
+        btn.style.cursor = 'pointer';
+        btn.style.transition = 'background-color 0.3s ease, transform 0.2s ease';
+
+        btn.addEventListener('mouseenter', () => {
+            btn.style.backgroundColor = '#2c5d91';
+            btn.style.transform = 'translateY(-2px)';
+        });
+        btn.addEventListener('mouseleave', () => {
+            btn.style.backgroundColor = '#4682B4';
+            btn.style.transform = 'none';
+        });
+
+        btn.onclick = () => {
+            const url = `/game.php?village=${villageId}&screen=${link.screen}`;
+            window.open(url, '_blank');
+        };
+
+        container.appendChild(btn);
+    });
+
+    document.body.appendChild(container);
+})();
