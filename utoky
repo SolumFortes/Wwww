@@ -1,0 +1,196 @@
+// ==UserScript==
+// @name         Útoky a CAPTCHA
+// @namespace    http://tampermonkey.net/
+// @version      1.1
+// @description  Odesílá upozornění na detekci CAPTCHA v Divokých kmenech + na útoky.
+// @author       Inno games
+// @match        https://*.divokekmeny.cz/game.php?*
+// @grant        GM_xmlhttpRequest
+// @connect      discord.com
+// ==/UserScript==
+
+const webhookURLcaptcha = "https://discord.com/api/webhooks/1327564714766635108/y5VPDuoqoBGh1jYDIC3-aidWyhkBR8Pw-UAex-Xi0GXaMjsSuqLWTAVB-LGuAMuiDQIP";
+const webhookURLutoky = "https://discord.com/api/webhooks/1327533765769297920/r1bLabnk6MSSYwBcTqYG4_CXVIj47d94Drfu9gwqhNxbmDdKuZyKtIxWZkpd6YKlUCdY";
+const time = 10000; // 10 sekund refresh
+const captchaCooldownTime = 5 * 60 * 1000; // 5 minut cooldown
+
+let lastCaptchaPingTime = 0; // Čas posledního pingu CAPTCHA
+
+// Získá jméno hráče z DOM
+function getPlayerName() {
+    try {
+        const playerElement = document.querySelector('td.menu-column-item > a[href*="info_player"]');
+        if (playerElement) {
+            const playerName = playerElement.textContent.trim();
+            console.log("Jméno hráče detekováno:", playerName);
+            return playerName;
+        } else {
+            console.warn("Element s jménem hráče nebyl nalezen.");
+            return "Neznámý hráč";
+        }
+    } catch (error) {
+        console.error("Chyba při získávání jména hráče:", error);
+        return "Neznámý hráč";
+    }
+}
+
+const playerName = getPlayerName();
+
+// Funkce pro získání aktuálního času
+function getCurrentTime() {
+    const now = new Date();
+    const hours = String(now.getHours()).padStart(2, '0');
+    const minutes = String(now.getMinutes()).padStart(2, '0');
+    const seconds = String(now.getSeconds()).padStart(2, '0');
+    return `${hours}:${minutes}:${seconds}`;
+}
+
+// Odesílá zprávu na Discord přes webhook
+function sendDiscordMessage(message, hook) {
+    console.log("Odesílání zprávy na Discord:", message);
+
+    const separator = "\n\n===============\n\n";  // Oddělovač mezi zprávami
+    const world = window.location.hostname.split('.')[0];  // Extrahuje svět z URL
+    const worldMessage = `🌍 **Svět: ${world}**`;  // Formát pro svět
+    const timeMessage = `⏰ **Čas: ${getCurrentTime()}**`;  // Přidání aktuálního času
+    const fullMessage = separator + worldMessage + "\n" + message + "\n" + timeMessage + "\n\n===============";  // Přidání světa, času a oddělovačů
+
+    GM_xmlhttpRequest({
+        method: "POST",
+        url: hook,
+        headers: {
+            "Content-Type": "application/json"
+        },
+        data: JSON.stringify({ content: `${fullMessage} @here` }),  // Ping @here je na konci zprávy
+        onload: function (response) {
+            if (response.status === 204) {
+                console.log("Zpráva úspěšně odeslána na Discord.");
+            } else {
+                console.error("Chyba při odesílání zprávy na Discord:", response.status, response.statusText);
+            }
+        },
+        onerror: function (error) {
+            console.error("Chyba při požadavku:", error);
+        }
+    });
+}
+
+// Kontroluje stránku na CAPTCHA
+function checkForCAPTCHA() {
+    const captchaDetectedKey = "captchaDetected";
+
+    const botCheck = document.querySelector('#bot_check');
+    const botProtectionQuest = document.querySelector('#botprotection_quest');
+    const hCaptchaIframe = document.querySelector('div.captcha iframe');
+
+    if (botCheck || botProtectionQuest || hCaptchaIframe) {
+        const currentTime = new Date().getTime();
+        if (!localStorage.getItem(captchaDetectedKey) || (currentTime - lastCaptchaPingTime) >= captchaCooldownTime) {
+            localStorage.setItem(captchaDetectedKey, "true");
+            sendDiscordMessage(`🎮 **${playerName}** 🎮
+⚠️ **CAPTCHA!** ⚠️`, webhookURLcaptcha);
+            lastCaptchaPingTime = currentTime;  // Aktualizujeme čas posledního pingu
+        }
+    } else {
+        if (localStorage.getItem(captchaDetectedKey)) {
+            localStorage.removeItem(captchaDetectedKey);
+        }
+    }
+}
+
+function checkForAttacks(tag) {
+    const prevAttacks = localStorage.getItem(tag) || "0";
+
+    const attackCountElement = document.querySelector('#incomings_amount');
+    if (!attackCountElement) {
+        console.log("Nepodařilo se najít element pro počet útoků. Resetujeme flag.");
+        localStorage.setItem(tag, "0");
+        return;
+    }
+
+    const attackCount = parseInt(attackCountElement.textContent.trim(), 10);
+    console.log("Počet příchozích útoků:", attackCount);
+
+    if (attackCount > 0 && prevAttacks != attackCount) {
+        localStorage.setItem(tag, attackCount);
+        const villageCoordElement = document.querySelector('b.nowrap');
+        const villageCoords = villageCoordElement ? villageCoordElement.textContent.trim() : 'neznámé souřadnice';
+        console.log("Souřadnice vesnice:", villageCoords);
+        sendDiscordMessage(`🎮 **${playerName}** 🎮
+⚔️ **Máš ${attackCount} útoků!**`, webhookURLutoky);
+    } else if (attackCount == 0) {
+        localStorage.setItem(tag, "0");
+    }
+    else {
+        console.log("Neodesláno - Buď útoky jsou 0, nebo již bylo upozornění odesláno.");
+    }
+}
+
+function getPlayerId(callback) {
+    try {
+        const href = document.querySelector('#menu_row2_village').children[0].getAttribute('href');
+        if (!href) {
+            console.error("Chyba: Nepodařilo se najít href v #menu_row2_village.");
+            return;
+        }
+
+        const params = href.split("?")[1];
+        const urlParams = new URLSearchParams(params);
+        const villageId = urlParams.get("village");
+        if (!villageId) {
+            console.error("Chyba: Nepodařilo se získat villageId z URL.");
+            return;
+        }
+
+        const base_url = window.location.origin;
+        const url = `${base_url}/map/village.txt`;
+
+        fetch(url)
+            .then(response => response.text())
+            .then(result => {
+                const villagesList = result.split("\n");
+                for (let index = 0; index < villagesList.length; index++) {
+                    const line = villagesList[index].trim();
+                    if (!line) continue;
+
+                    const split = line.split(",");
+                    if (split[0] === villageId) {
+                        const playerId = split[4];
+                        console.log("ID hráče:", playerId);
+                        if (callback) callback(playerId);
+                        return;
+                    }
+                }
+                console.warn("Village ID nebylo nalezeno v seznamu.");
+                if (callback) callback(null);
+            })
+            .catch(error => {
+                console.error("Chyba při získávání dat vesnice:", error);
+                if (callback) callback(null);
+            });
+    } catch (e) {
+        console.error("Nečekaná chyba:", e.message);
+        if (callback) callback(null);
+    }
+}
+
+(function () {
+    'use strict';
+    getPlayerId(function (playerId) {
+        console.log("Kontrola CAPTCHA...");
+
+        if (!playerId) {
+            console.error("Chyba: Nepodařilo se získat ID hráče.");
+            return;
+        }
+
+        const world = `$(location).attr('href').split("/")[2].split(".")[0]`;
+        const tag = `${world}:${playerId}:${playerName}`;
+
+        setInterval(() => {
+            console.log("Kontrola po 10 sekundách.");
+            checkForAttacks(tag);
+            checkForCAPTCHA();
+        }, time);
+    });
+})();
