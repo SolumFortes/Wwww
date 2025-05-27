@@ -1,0 +1,255 @@
+// ==UserScript==
+// @name         Stáje
+// @namespace    http://tampermonkey.net/
+// @version      1.0
+// @description  Automatizuje rekrut ve stájích
+// @author       Wwww
+// @match        https://*/game.php?*screen=stable*
+// @grant        none
+// @icon         https://dscs.innogamescdn.com/asset/07220f21/graphic/buildings/stable.png
+// ==/UserScript==
+
+(function () {
+    'use strict';
+
+    function saveData(key, value) {
+        const prefix = 'stable_';
+        localStorage.setItem(prefix + key, JSON.stringify(value));
+    }
+
+    function loadData(key, defaultValue) {
+        const prefix = 'stable_';
+        const data = localStorage.getItem(prefix + key);
+        return data ? JSON.parse(data) : defaultValue;
+    }
+
+    // Nastaví defaultní hodnotu, pokud ještě v localStorage nic není
+    function setDefaultIfEmpty(key, defaultValue) {
+        const prefix = 'stable_';
+        if (localStorage.getItem(prefix + key) === null) {
+            saveData(key, defaultValue);
+        }
+    }
+
+    // Nastavení výchozích hodnot před vytvořením UI
+    setDefaultIfEmpty('spyMax', 201);
+    setDefaultIfEmpty('lightMax', 0);
+    setDefaultIfEmpty('marcherMax', 0);
+    setDefaultIfEmpty('heavyMax', 0);
+
+    // UI kontejner
+    const container = document.createElement('div');
+    container.style.position = 'fixed';
+    container.style.left = '15px';
+    container.style.top = '50%';
+    container.style.transform = 'translateY(-50%)';
+    container.style.padding = '10px 15px';
+    container.style.border = '1px solid #c8b68b';
+    container.style.borderRadius = '10px';
+    container.style.backgroundColor = 'rgba(245, 222, 179, 0.95)';
+    container.style.boxShadow = '0 6px 15px rgba(0, 0, 0, 0.12)';
+    container.style.fontFamily = "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif";
+    container.style.fontSize = '13px';
+    container.style.color = '#5a3e1b';
+    container.style.zIndex = 10000;
+    container.style.minWidth = '180px';
+
+    const table = document.createElement('table');
+    table.style.width = '100%';
+    table.style.borderCollapse = 'separate';
+    table.style.borderSpacing = '6px 8px';
+
+    // Tlačítko ON/OFF
+    const toggleBtn = document.createElement('button');
+    const scriptStatus = loadData('scriptStatus', false);
+    toggleBtn.textContent = scriptStatus ? 'Stáje - ON' : 'Stáje - OFF';
+    toggleBtn.style.backgroundColor = scriptStatus ? '#4CAF50' : '#f44336';
+    toggleBtn.style.color = 'white';
+    toggleBtn.style.border = 'none';
+    toggleBtn.style.borderRadius = '18px';
+    toggleBtn.style.padding = '7px 20px';
+    toggleBtn.style.cursor = 'pointer';
+    toggleBtn.style.fontSize = '14px';
+    toggleBtn.style.fontWeight = '600';
+    toggleBtn.style.transition = 'background-color 0.3s ease, transform 0.2s ease';
+    toggleBtn.style.boxShadow = '0 3px 9px rgba(0,0,0,0.18)';
+    toggleBtn.onmouseover = () => {
+        toggleBtn.style.transform = 'scale(1.04)';
+        toggleBtn.style.boxShadow = '0 4px 11px rgba(0,0,0,0.25)';
+    };
+    toggleBtn.onmouseout = () => {
+        toggleBtn.style.transform = 'scale(1)';
+        toggleBtn.style.boxShadow = '0 3px 9px rgba(0,0,0,0.18)';
+    };
+    toggleBtn.onclick = () => {
+        const isOn = toggleBtn.textContent === 'Stáje - ON';
+        toggleBtn.textContent = isOn ? 'Stáje - OFF' : 'Stáje - ON';
+        toggleBtn.style.backgroundColor = isOn ? '#f44336' : '#4CAF50';
+        saveData('scriptStatus', !isOn);
+        if (!isOn) {
+            startScript();
+        }
+    };
+
+    const btnRow = table.insertRow();
+    const btnCell = btnRow.insertCell();
+    btnCell.colSpan = 3;
+    btnCell.style.textAlign = 'center';
+    btnCell.appendChild(toggleBtn);
+
+    // Pomocná funkce na vytvoření řádku jednotky
+    function createUnitRow(unitKey, unitName, unitImgSrc) {
+        const row = table.insertRow();
+
+        const imgCell = row.insertCell();
+        const img = document.createElement('img');
+        img.src = unitImgSrc;
+        img.style.width = '20px';
+        img.style.height = '20px';
+        img.style.marginRight = '6px';
+        img.style.verticalAlign = 'middle';
+        img.style.filter = 'drop-shadow(1px 1px 1px rgba(0,0,0,0.15))';
+        imgCell.appendChild(img);
+
+        const nameCell = row.insertCell();
+        nameCell.textContent = unitName;
+        nameCell.style.verticalAlign = 'middle';
+
+        const inputCell = row.insertCell();
+        const input = document.createElement('input');
+        input.type = 'number';
+        input.min = 0;
+        input.value = loadData(unitKey + 'Max', 0);
+        input.style.border = '1.3px solid #c8b68b';
+        input.style.borderRadius = '7px';
+        input.style.padding = '5px 7px';
+        input.style.fontSize = '13px';
+        input.style.width = '60px';
+        input.style.textAlign = 'center';
+        input.style.transition = 'border-color 0.3s ease';
+        input.addEventListener('focus', () => input.style.borderColor = '#a67c00');
+        input.addEventListener('blur', () => input.style.borderColor = '#c8b68b');
+        input.addEventListener('change', () => {
+            const val = parseInt(input.value) || 0;
+            saveData(unitKey + 'Max', val);
+        });
+        inputCell.appendChild(input);
+        inputCell.style.verticalAlign = 'middle';
+
+        return input;
+    }
+
+    // Jednotky
+    createUnitRow('spy', 'Špeh', 'https://dscs.innogamescdn.com/asset/07220f21/graphic/unit/unit_spy.png');
+    createUnitRow('light', 'Lehká kavalerie', 'https://dscs.innogamescdn.com/asset/07220f21/graphic/unit/unit_light.png');
+    createUnitRow('marcher', 'Lučištník na koni', 'https://dscs.innogamescdn.com/asset/07220f21/graphic/unit/unit_marcher.png');
+    createUnitRow('heavy', 'Těžká kavalerie', 'https://dscs.innogamescdn.com/asset/07220f21/graphic/unit/unit_heavy.png');
+
+    container.appendChild(table);
+    document.body.appendChild(container);
+
+    function delay(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    function randomDelay(min, max) {
+        const val = Math.random() * (max - min) + min;
+        return new Promise(resolve => setTimeout(resolve, val));
+    }
+
+    // Spočítá aktuální počet jednotek v produkci + ve skladu
+    function calculateUnitCount(type) {
+        const queueItems = Array.from(document.getElementsByClassName("unit_sprite"));
+        let queue = 0;
+        queueItems.forEach((item) => {
+            const isProperType = item.className.toString().includes(type);
+            if (isProperType) {
+                const count = parseInt(item.nextSibling.textContent.trim().split(" ")[0]);
+                queue += count;
+            }
+        });
+        const unitLink = document.querySelector(`a[data-unit="${type}"]`);
+        if (!unitLink) {
+            return queue;
+        }
+        const parentRow = unitLink.closest('tr');
+        const unitCell = parentRow.querySelector('td:nth-child(3)');
+        const unitText = unitCell.textContent.trim();
+        const numberOfUnit = parseInt(unitText.split('/')[1]) || 0;
+        return queue + numberOfUnit;
+    }
+
+    // Převod času ve formátu hh:mm:ss nebo mm:ss na ms
+    function parseTimeToMs(timeStr) {
+        const parts = timeStr.split(':').map(Number);
+        let ms = 0;
+        if (parts.length === 3) {
+            ms = (parts[0] * 3600 + parts[1] * 60 + parts[2]) * 1000;
+        } else if (parts.length === 2) {
+            ms = (parts[0] * 60 + parts[1]) * 1000;
+        } else if (parts.length === 1) {
+            ms = parts[0] * 1000;
+        }
+        return ms;
+    }
+
+    // Hlavní smyčka skriptu
+    async function startScript() {
+        if (!loadData('scriptStatus', false)) {
+            return;
+        }
+
+        try {
+            const maxSpy = parseInt(loadData('spyMax', 0));
+            const maxLight = parseInt(loadData('lightMax', 0));
+            const maxMarcher = parseInt(loadData('marcherMax', 0));
+            const maxHeavy = parseInt(loadData('heavyMax', 0));
+
+            const units = [
+                { key: 'spy', max: maxSpy },
+                { key: 'light', max: maxLight },
+                { key: 'marcher', max: maxMarcher },
+                { key: 'heavy', max: maxHeavy }
+            ];
+
+            for (const unit of units) {
+                if (unit.max <= 0) continue;
+
+                const currentCount = calculateUnitCount(unit.key);
+                if (currentCount >= unit.max) continue;
+
+                const inputField = document.querySelector(`#${unit.key}_0`);
+                const recruitBtn = document.querySelector('.btn-recruit');
+
+                if (!inputField || !recruitBtn) {
+                    await delay(30000);
+                    location.reload();
+                    return;
+                }
+
+                inputField.value = 1;
+                await randomDelay(500, 1000);
+                recruitBtn.click();
+
+                const timeSpan = document.getElementById(`${unit.key}_0_cost_time`);
+                const waitTime = timeSpan ? parseTimeToMs(timeSpan.textContent.trim()) : 5000;
+
+                await delay(waitTime);
+                location.reload();
+                return; // čeká na reload stránky před další akcí
+            }
+
+            saveData('scriptStatus', false);
+            toggleBtn.textContent = 'Stáje - OFF';
+            toggleBtn.style.backgroundColor = '#f44336';
+
+        } catch (e) {
+            await delay(30000);
+            location.reload();
+        }
+    }
+
+    if (loadData('scriptStatus', false)) {
+        startScript();
+    }
+})();
